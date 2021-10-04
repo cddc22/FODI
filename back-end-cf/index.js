@@ -8,6 +8,28 @@ const EXPOSE_PATH = "";
 const ONEDRIVE_REFRESHTOKEN = "";
 const PASSWD_FILENAME = ".password";
 
+addEventListener('scheduled', event => {
+  event.waitUntil(fetchAccessToken(event.scheduledTime));
+});
+
+addEventListener("fetch", (event) => {
+  try {
+    return event.respondWith(handleRequest(event.request));
+  } catch (e) {
+    return event.respondWith(new Response("Error thrown " + e.message));
+  }
+});
+
+const OAUTH = {
+  redirectUri: redirectUri,
+  refreshToken: ONEDRIVE_REFRESHTOKEN,
+  clientId: clientId,
+  clientSecret: clientSecret,
+  oauthUrl: loginHost + "/common/oauth2/v2.0/",
+  apiUrl: apiHost + "/v1.0/me/drive/root",
+  scope: apiHost + "/Files.ReadWrite.All offline_access",
+};
+
 async function handleRequest(request) {
   let querySplited, requestPath;
   let queryString = decodeURIComponent(request.url.split("?")[1]);
@@ -44,24 +66,6 @@ async function handleRequest(request) {
     });
   }
 }
-
-addEventListener("fetch", (event) => {
-  try {
-    return event.respondWith(handleRequest(event.request));
-  } catch (e) {
-    return event.respondWith(new Response("Error thrown " + e.message));
-  }
-});
-
-const OAUTH = {
-  redirectUri: redirectUri,
-  refreshToken: ONEDRIVE_REFRESHTOKEN,
-  clientId: clientId,
-  clientSecret: clientSecret,
-  oauthUrl: loginHost + "/common/oauth2/v2.0/",
-  apiUrl: apiHost + "/v1.0/me/drive/root",
-  scope: apiHost + "/Files.ReadWrite.All offline_access",
-};
 
 async function gatherResponse(response) {
   const { headers } = response;
@@ -115,15 +119,36 @@ async function fetchFormData(url, data) {
 }
 
 async function fetchAccessToken() {
-  url = OAUTH["oauthUrl"] + "token";
-  data = {
+  let refreshToken = OAUTH["refreshToken"];
+  if (typeof FODI_CACHE !== 'undefined') {
+    let cache = await FODI_CACHE.get('token_data');
+    if (cache) {
+      cache = JSON.parse(cache);
+      if (cache.access_token) {
+        return cache.access_token;
+      }
+
+      refreshToken = cache.refresh_token || refreshToken;
+    }
+  }
+
+  const url = OAUTH["oauthUrl"] + "token";
+  const data = {
     client_id: OAUTH["clientId"],
     client_secret: OAUTH["clientSecret"],
     grant_type: "refresh_token",
     requested_token_use: "on_behalf_of",
-    refresh_token: OAUTH["refreshToken"],
+    refresh_token: refreshToken,
   };
   const result = await fetchFormData(url, data);
+
+  if (typeof FODI_CACHE !== 'undefined') {
+    await FODI_CACHE.put(
+      'token_data',
+      JSON.stringify(result),
+      { expirationTtl: result.expires_in - 600 }
+    );
+  }
   return result.access_token;
 }
 
